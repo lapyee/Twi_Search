@@ -3,7 +3,7 @@ name: X Keyword Tracker
 on:
   schedule:
     - cron: '*/15 * * * *' # 每 15 分鐘在雲端自動執行一次
-  workflow_dispatch: # 支援在手機上一鍵手動觸發
+  workflow_dispatch: # 支援在手機上手動觸發
 
 jobs:
   run-bot:
@@ -15,7 +15,7 @@ jobs:
         with:
           python-version: '3.10'
       - name: Install Packages
-        run: pip install ntscraper requests
+        run: pip install requests
       - name: Run Script
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
