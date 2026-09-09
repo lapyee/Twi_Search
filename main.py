@@ -2,14 +2,12 @@ import html
 import os
 import re
 import requests
+import xml.etree.ElementTree as ET
 from urllib.parse import quote
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
-KEYWORD = "김찬종 임태현 양도 -is:retweet"
-
-# X 官方 Web App 的公共 Bearer Token（公開固定值）
-BEARER_TOKEN = "AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA"
+KEYWORD = "김찬종 임태현 양도"
 
 
 def send_telegram(text):
@@ -32,79 +30,76 @@ def clean_html(raw_html):
     return html.unescape(cleantext)
 
 
-def get_guest_token():
-    """動態向 X 獲取 Guest Token"""
-    url = "https://api.x.com/1.1/guest/activate.json"
-    headers = {"authorization": f"Bearer {BEARER_TOKEN}"}
-    try:
-        res = requests.post(url, headers=headers, timeout=10)
-        if res.status_code == 200:
-            return res.json().get("guest_token")
-    except Exception as e:
-        print(f"獲取 Guest Token 失敗: {e}")
+def try_rsshub_sources(encoded_query):
+    """嘗試透過公開 RSS/RSSHub 鏡像源獲取推文"""
+    sources = [
+        f"https://rsshub.app/twitter/keyword/{encoded_query}",
+        f"https://nitter.privacydev.net/search/rss?f=tweets&q={encoded_query}",
+        f"https://nitter.poast.org/search/rss?f=tweets&q={encoded_query}",
+    ]
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        )
+    }
+
+    for url in sources:
+        try:
+            print(f"🔄 嘗試備用 RSS 管道: {url.split('/')[2]}")
+            res = requests.get(url, headers=headers, timeout=8)
+            if res.status_code == 200:
+                root = ET.fromstring(res.text)
+                items = root.findall("./channel/item")
+                if items:
+                    tweets = []
+                    for item in items[:3]:
+                        link = (
+                            item.find("link").text
+                            if item.find("link") is not None
+                            else ""
+                        )
+                        desc = (
+                            item.find("description").text
+                            if item.find("description") is not None
+                            else ""
+                        )
+                        tweets.append({"text": desc, "link": link, "user": "X"})
+                    return tweets
+        except Exception as e:
+            print(f"⚠️ 該 RSS 源失敗: {e}")
+            continue
     return None
 
 
 def main():
+    encoded_query = quote(KEYWORD)
     print(f"🔍 開始請求 X 搜尋: {KEYWORD}")
 
-    guest_token = get_guest_token()
-    if not guest_token:
-        print("🔴 無法取得 Guest Token，暫時無法請求 X API。")
-        return
+    tweets = try_rsshub_sources(encoded_query)
 
-    print("🔑 成功取得 Guest Token，發起搜尋請求...")
+    if tweets:
+        print(f"✅ 成功抓取到 {len(tweets)} 條推文，準備發送 Telegram...")
+        for tweet in tweets:
+            clean_text = clean_html(tweet["text"])
+            clean_text = (
+                clean_text.replace("*", "")
+                .replace("_", "")
+                .replace("`", "")
+                .replace("[", "")
+                .replace("]", "")
+            )
 
-    search_url = f"https://api.x.com/1.1/search/tweets.json?q={quote(KEYWORD)}&count=10&result_type=recent"
-    headers = {
-        "authorization": f"Bearer {BEARER_TOKEN}",
-        "x-guest-token": guest_token,
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-        ),
-    }
-
-    try:
-        res = requests.get(search_url, headers=headers, timeout=10)
-        print(f"📡 伺服器回應 HTTP 狀態碼: {res.status_code}")
-
-        if res.status_code == 200:
-            statuses = res.json().get("statuses", [])
-            print(f"📊 成功抓取到 {len(statuses)} 條推文項目")
-
-            if statuses:
-                print("✅ 發現符合條件的推文，準備發送 Telegram...")
-                for tweet in statuses[:3]:
-                    text = tweet.get("text", "")
-                    user = tweet.get("user", {}).get("screen_name", "twitter")
-                    tweet_id = tweet.get("id_str", "")
-                    link = f"https://x.com/{user}/status/{tweet_id}"
-
-                    clean_text = clean_html(text)
-                    clean_text = (
-                        clean_text.replace("*", "")
-                        .replace("_", "")
-                        .replace("`", "")
-                        .replace("[", "")
-                        .replace("]", "")
-                    )
-
-                    msg = (
-                        f"🚨 *發現 X (Twitter) 新 양도 (轉讓) 推文！*\n\n"
-                        f"👤 @{user}\n"
-                        f"📝 {clean_text[:200]}...\n\n"
-                        f"🔗 [點擊開啟原推文]({link})"
-                    )
-                    send_telegram(msg)
-            else:
-                print(
-                    "🟢 連線完全正常，HTTP 200 OK！但目前 X 上確實沒有符合條件的新推文。"
-                )
-        else:
-            print(f"🔴 請求失敗，HTTP 狀態碼: {res.status_code}")
-
-    except Exception as e:
-        print(f"❌ 執行發生例外異常: {e}")
+            msg = (
+                f"🚨 *發現 X (Twitter) 新 양도 (轉讓) 推文！*\n\n"
+                f"📝 {clean_text[:200]}...\n\n"
+                f"🔗 [點擊開啟原推文]({tweet['link']})"
+            )
+            send_telegram(msg)
+    else:
+        print(
+            "🟢 目前所有免登入管道暫無新推文（或節點冷卻中），系統維持靜音等待下一次輪詢。"
+        )
 
 
 if __name__ == "__main__":
