@@ -33,10 +33,12 @@ def clean_html(raw_html):
 def main():
     encoded_query = quote(KEYWORD)
 
-    # 使用穩定的開放 RSS 鏡像站
+    # 彙整目前可用的免費 RSS 來源 (包含 RSSHub 鏡像與 Nitter 活躍節點)
     rss_sources = [
-        f"https://nitter.privacydev.net/search/rss?f=tweets&q={encoded_query}",
-        f"https://nitter.poast.org/search/rss?f=tweets&q={encoded_query}",
+        f"https://rsshub.app/twitter/keyword/{encoded_query}",
+        f"https://rss.feed43.com/twitter/{encoded_query}",
+        f"https://nitter.net/search/rss?f=tweets&q={encoded_query}",
+        f"https://nitter.x86.men/search/rss?f=tweets&q={encoded_query}",
     ]
 
     headers = {
@@ -47,39 +49,43 @@ def main():
 
     for rss_url in rss_sources:
         try:
+            print(f"嘗試抓取: {rss_url}")
             res = requests.get(rss_url, headers=headers, timeout=10)
             if res.status_code == 200:
                 root = ET.fromstring(res.text)
                 items = root.findall("./channel/item")
 
-                for item in items[:3]:
-                    link = (
-                        item.find("link").text
-                        if item.find("link") is not None
-                        else ""
-                    )
-                    desc = (
-                        item.find("description").text
-                        if item.find("description") is not None
-                        else ""
-                    )
+                if items:
+                    for item in items[:3]:
+                        link = (
+                            item.find("link").text
+                            if item.find("link") is not None
+                            else ""
+                        )
+                        desc = (
+                            item.find("description").text
+                            if item.find("description") is not None
+                            else ""
+                        )
 
-                    clean_text = clean_html(desc)
-                    clean_text = (
-                        clean_text.replace("*", "")
-                        .replace("_", "")
-                        .replace("`", "")
-                    )
+                        clean_text = clean_html(desc)
+                        clean_text = (
+                            clean_text.replace("*", "")
+                            .replace("_", "")
+                            .replace("`", "")
+                        )
 
-                    msg = (
-                        f"🚨 *發現 X (Twitter) 新 양도 (轉讓) 推文！*\n\n"
-                        f"📝 {clean_text[:200]}...\n\n"
-                        f"🔗 [點擊開啟原推文]({link})"
-                    )
-                    send_telegram(msg)
-                break
+                        msg = (
+                            f"🚨 *發現 X (Twitter) 新 양도 (轉讓) 推文！*\n\n"
+                            f"📝 {clean_text[:200]}...\n\n"
+                            f"🔗 [點擊開啟原推文]({link})"
+                        )
+                        send_telegram(msg)
+                    # 成功抓到資料後跳出迴圈
+                    break
         except Exception as e:
-            print("鏡像源連線失敗:", e)
+            print("該源連線失敗:", e)
+            continue
 
 
 if __name__ == "__main__":
